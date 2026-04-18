@@ -1,0 +1,81 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  
+  --color-bg-main: #0F172A;
+  --color-bg-card: #1E293B;
+  --color-text-primary: #F8FAFC;
+  --color-text-secondary: #94A3B8;
+  --color-accent-teal: #2DD4BF;
+  --color-accent-purple: #818CF8;
+  --color-accent-orange: #FB923C;
+  --color-border-subtle: rgba(255, 255, 255, 0.1);
+}
+
+@layer base {
+  body {
+    @apply font-sans antialiased bg-bg-main text-text-primary transition-colors duration-300;
+  }
+}
+
+@layer components {
+  .vibrant-glass {
+    @apply backdrop-blur-md bg-bg-main/80 border-b border-border-subtle;
+  }
+
+  .btn-vibrant-generate {
+    @apply w-full py-3.5 px-6 bg-gradient-to-r from-accent-teal to-accent-purple border-none rounded-xl text-white font-bold text-base cursor-pointer shadow-[0_4px_20px_rgba(129,140,248,0.3)] transition-all active:scale-95 hover:brightness-110;
+  }
+
+  .vibrant-card {
+    @apply bg-bg-card border border-border-subtle rounded-2xl p-5 relative transition-all hover:shadow-2xl hover:border-white/20;
+  }
+
+  .vibrant-sidebar {
+    @apply bg-bg-main border-r border-border-subtle p-6 flex flex-col gap-6 overflow-y-auto;
+  }
+
+  .vibrant-results {
+    @apply p-8 bg-[radial-gradient(circle_at_top_right,rgba(129,140,248,0.1),transparent)] overflow-y-auto;
+  }
+
+  .vibrant-chip {
+    @apply px-3.5 py-1.5 rounded-full text-xs font-medium bg-bg-card border border-border-subtle cursor-pointer transition-all;
+  }
+
+  .vibrant-chip.active {
+    @apply bg-accent-teal text-bg-main border-accent-teal;
+  }
+
+  .vibrant-input {
+    @apply w-full bg-bg-card border border-border-subtle rounded-lg p-2.5 text-text-primary text-sm focus:outline-none focus:ring-1 focus:ring-accent-teal;
+  }
+
+  .vibrant-textarea {
+    @apply w-full bg-bg-card border border-border-subtle rounded-lg p-3 text-text-primary font-sans resize-none text-sm focus:outline-none focus:ring-1 focus:ring-accent-teal;
+  }
+
+  .vibrant-label {
+    @apply block text-[12px] font-semibold uppercase tracking-wider mb-2 text-text-secondary;
+  }
+
+  .vibrant-upload {
+    @apply border-2 border-dashed border-border-subtle rounded-xl flex flex-col items-center justify-center gap-2 bg-[#1E293B]/50 transition-all hover:border-accent-teal hover:bg-[#1E293B]/80 cursor-pointer;
+  }
+
+  /* Custom Scrollbar */
+  .custom-scrollbar::-webkit-scrollbar {
+    @apply w-1.5;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    @apply bg-border-subtle rounded-full hover:bg-white/20 transition-colors;
+  }
+}
+
+
+
