@@ -110,7 +110,7 @@ Key rules:
 - Emojis: ${options.includeEmojis ? 'Use naturally where they enhance emotion' : 'Do not use emojis'}.
 - Hashtags: ${options.includeHashtags ? 'Include 3-8 relevant, trending-style hashtags' : 'Do not include hashtags'}.
 - Call-to-Action (CTA): ${options.includeCTA ? 'Add a strong, relevant call-to-action' : 'Do not include a CTA'}.
-- Language: ${options.language}.
+- Language: ${options.language}.${options.language.toLowerCase().includes('urdu') ? ' USE PROPER URDU SCRIPT (اردو).' : ''}
 - Make captions feel authentic and human — avoid generic AI fluff.
 - Vary the structure across variations.
 - For Instagram/TikTok: Focus on visual and emotional hooks.
@@ -187,6 +187,7 @@ Return the response as a JSON object with:
           platform: item.platform as Platform,
           tone: options.tone,
           timestamp: Date.now(),
+          language: options.language
         })),
         visualAnalysis: rawData.visualAnalysis
       };
@@ -199,17 +200,23 @@ Return the response as a JSON object with:
 export async function suggestHashtags(
   caption: string,
   visualAnalysis: string | null = null,
-  context: string = ""
+  context: string = "",
+  language: string = "English"
 ): Promise<string[]> {
   return retryWithBackoff(async () => {
     const model = "gemini-3-flash-preview";
     
+    const languageInstruction = language.toLowerCase().includes('urdu') 
+      ? `\n- Language: Urdu. USE PROPER URDU SCRIPT (اردو). Ensure all hashtags are also in Urdu script.` 
+      : `\n- Language: ${language}.`;
+
     const prompt = `You are a social media strategist. 
 Based on the following caption and context, suggest 15 highly relevant, trending-style hashtags.
 ${visualAnalysis ? `Visual content details (use this for hashtag relevance): "${visualAnalysis}"` : ''}
 
 Caption: "${caption}"
 Context: "${context}"
+${languageInstruction}
 
 Return exactly a JSON array of strings, each starting with #.`;
 

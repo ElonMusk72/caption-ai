@@ -32,6 +32,7 @@ export interface GeneratedCaption {
   timestamp: number;
   isFavorite?: boolean;
   variant?: 'A' | 'B';
+  language?: string;
 }
 
 export interface UserSettings {

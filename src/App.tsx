@@ -47,7 +47,7 @@ const TONES: Tone[] = [
   'Fun & Playful', 'Professional', 'Witty/Humorous', 'Inspirational', 
   'Luxury/Elegant', 'Casual', 'Salesy/Promotional', 'Emotional', 'Educational'
 ];
-const LANGUAGES = ['English', 'Spanish', 'French', 'German', 'Portuguese', 'Japanese', 'Korean'];
+const LANGUAGES = ['English', 'Spanish', 'French', 'German', 'Portuguese', 'Japanese', 'Korean', 'Urdu (اردو)'];
 
 export default function App() {
   const [state, setState] = useState<AppState>({
@@ -341,7 +341,7 @@ export default function App() {
     
     try {
       // Optimize: Use cached visual analysis instead of re-sending full image binary
-      const suggestions = await suggestHashtags(caption.text, state.visualAnalysis, state.context);
+      const suggestions = await suggestHashtags(caption.text, state.visualAnalysis, state.context, caption.language);
       setSuggestedHashtags(suggestions);
     } catch (err: any) {
       console.error("Failed to fetch hashtags", err);
