@@ -31,13 +31,13 @@ export interface GeneratedCaption {
   tone: Tone;
   timestamp: number;
   isFavorite?: boolean;
+  variant?: 'A' | 'B';
 }
 
-export interface UserProfile {
+export interface UserSettings {
   defaultTone: Tone;
   defaultLanguage: string;
   defaultPlatforms: Platform[];
-  name: string;
 }
 
 export interface CaptionTemplate {
@@ -51,6 +51,8 @@ export interface AppState {
   imageName: string | null;
   context: string;
   options: GenerationOptions;
+  abOptions: GenerationOptions | null; // Separate options for A/B testing
+  abMode: boolean;
   results: GeneratedCaption[];
   history: GeneratedCaption[];
   templates: CaptionTemplate[];
@@ -59,5 +61,5 @@ export interface AppState {
   visualAnalysis: string | null;
   theme: 'dark' | 'light';
   error: string | null;
-  profile: UserProfile;
+  settings: UserSettings;
 }

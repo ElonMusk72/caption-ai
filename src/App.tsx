@@ -26,7 +26,9 @@ import {
   PlusCircle,
   Pencil,
   FileText,
-  Hash
+  Hash,
+  Split,
+  ArrowRight
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -62,6 +64,17 @@ export default function App() {
       language: 'English',
       variationCount: 3,
     },
+    abOptions: {
+      platforms: ['Instagram'],
+      tone: 'Professional',
+      length: 'Medium',
+      includeEmojis: true,
+      includeHashtags: true,
+      includeCTA: true,
+      language: 'English',
+      variationCount: 3,
+    },
+    abMode: false,
     results: [],
     history: [],
     templates: [],
@@ -70,8 +83,7 @@ export default function App() {
     visualAnalysis: null,
     theme: 'light',
     error: null,
-    profile: {
-      name: '',
+    settings: {
       defaultLanguage: 'English',
       defaultTone: 'Fun & Playful',
       defaultPlatforms: ['Instagram'],
@@ -79,13 +91,14 @@ export default function App() {
   });
 
   const [showHistory, setShowHistory] = useState(false);
-  const [showProfile, setShowProfile] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
   const [showPrivacy, setShowPrivacy] = useState(false);
   const [showTerms, setShowTerms] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [historySearch, setHistorySearch] = useState('');
   const [activeTab, setActiveTab] = useState<'All' | 'Favorites'>('All');
+  const [activeVariant, setActiveVariant] = useState<'A' | 'B'>('A');
   const [newTemplate, setNewTemplate] = useState({ name: '', structure: '' });
   const [isEditingTemplate, setIsEditingTemplate] = useState<string | null>(null);
   
@@ -94,12 +107,13 @@ export default function App() {
   const [analyzingCaption, setAnalyzingCaption] = useState<GeneratedCaption | null>(null);
   const [suggestedHashtags, setSuggestedHashtags] = useState<string[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [hashtagError, setHashtagError] = useState<string | null>(null);
 
-  // Load history, theme, and profile from local storage
+  // Load history, theme, and settings from local storage
   useEffect(() => {
     const savedHistory = localStorage.getItem('captionAI_history');
     const savedTheme = localStorage.getItem('captionAI_theme') as 'dark' | 'light';
-    const savedProfile = localStorage.getItem('captionAI_profile');
+    const savedSettings = localStorage.getItem('captionAI_settings');
     const savedTemplates = localStorage.getItem('captionAI_templates');
     
     if (savedHistory) {
@@ -115,26 +129,26 @@ export default function App() {
       if (savedTheme === 'dark') document.documentElement.classList.add('dark');
     }
 
-    if (savedProfile) {
-      const profile = JSON.parse(savedProfile);
+    if (savedSettings) {
+      const settings = JSON.parse(savedSettings);
       setState(prev => ({ 
         ...prev, 
-        profile,
+        settings,
         options: {
           ...prev.options,
-          tone: profile.defaultTone,
-          language: profile.defaultLanguage,
-          platforms: profile.defaultPlatforms
+          tone: settings.defaultTone,
+          language: settings.defaultLanguage,
+          platforms: settings.defaultPlatforms
         }
       }));
     }
   }, []);
 
-  // Save profile to local storage
-  const saveProfile = (profile: any) => {
-    localStorage.setItem('captionAI_profile', JSON.stringify(profile));
-    setState(prev => ({ ...prev, profile, error: null }));
-    setShowProfile(false);
+  // Save settings to local storage
+  const saveSettings = (settings: any) => {
+    localStorage.setItem('captionAI_settings', JSON.stringify(settings));
+    setState(prev => ({ ...prev, settings, error: null }));
+    setShowSettings(false);
   };
 
   // Save history to local storage
@@ -182,17 +196,43 @@ export default function App() {
     
     try {
       const template = state.templates.find(t => t.id === state.selectedTemplateId);
-      const result = await generateCaptions(
-        state.image, 
-        state.context, 
-        state.options,
-        template?.structure || null
-      );
+      
+      const generateTask = async (options: GenerationOptions, variant?: 'A' | 'B') => {
+        const result = await generateCaptions(
+          state.image, 
+          state.context, 
+          options,
+          template?.structure || null
+        );
+        return result.captions.map(c => ({ ...c, variant }));
+      };
+
+      let finalCaptions: GeneratedCaption[] = [];
+      let finalVisualAnalysis: string | null = null;
+
+      if (state.abMode && state.abOptions) {
+        // Run both in parallel
+        const [resA, resB] = await Promise.all([
+          generateCaptions(state.image, state.context, state.options, template?.structure || null),
+          generateCaptions(state.image, state.context, state.abOptions, template?.structure || null)
+        ]);
+        
+        finalCaptions = [
+          ...resA.captions.map(c => ({ ...c, variant: 'A' as const })),
+          ...resB.captions.map(c => ({ ...c, variant: 'B' as const }))
+        ];
+        finalVisualAnalysis = resA.visualAnalysis; // Analysis should be same for both
+      } else {
+        const res = await generateCaptions(state.image, state.context, state.options, template?.structure || null);
+        finalCaptions = res.captions;
+        finalVisualAnalysis = res.visualAnalysis;
+      }
+
       setState(prev => ({ 
         ...prev, 
-        results: result.captions, 
-        history: [...result.captions, ...prev.history].slice(0, 50),
-        visualAnalysis: result.visualAnalysis, // Cache analysis for hashtag speed
+        results: finalCaptions, 
+        history: [...finalCaptions, ...prev.history].slice(0, 50),
+        visualAnalysis: finalVisualAnalysis,
         isGenerating: false,
         error: null
       }));
@@ -214,12 +254,17 @@ export default function App() {
 
   const togglePlatform = (p: Platform) => {
     setState(prev => {
-      const platforms = prev.options.platforms.includes(p)
-        ? prev.options.platforms.filter(item => item !== p)
-        : [...prev.options.platforms, p];
+      const targetOptions = activeVariant === 'A' ? 'options' : 'abOptions';
+      const options = prev[targetOptions];
+      if (!options) return prev;
+
+      const platforms = options.platforms.includes(p)
+        ? options.platforms.filter(item => item !== p)
+        : [...options.platforms, p];
+      
       return { 
         ...prev, 
-        options: { ...prev.options, platforms: platforms.length > 0 ? platforms : prev.options.platforms } 
+        [targetOptions]: { ...options, platforms: platforms.length > 0 ? platforms : options.platforms } 
       };
     });
   };
@@ -245,7 +290,7 @@ export default function App() {
   };
 
   const clearResults = () => {
-    setState(prev => ({ ...prev, results: [], image: null, imageName: null, context: '' }));
+    setState(prev => ({ ...prev, results: [], image: null, imageName: null, context: '', visualAnalysis: null }));
   };
 
   const handleAddTemplate = () => {
@@ -292,13 +337,15 @@ export default function App() {
     setShowHashtags(true);
     setIsAnalyzing(true);
     setSuggestedHashtags([]);
+    setHashtagError(null);
     
     try {
       // Optimize: Use cached visual analysis instead of re-sending full image binary
       const suggestions = await suggestHashtags(caption.text, state.visualAnalysis, state.context);
       setSuggestedHashtags(suggestions);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to fetch hashtags", err);
+      setHashtagError(err.message || "Failed to analyze hashtags.");
     } finally {
       setIsAnalyzing(false);
     }
@@ -343,6 +390,97 @@ export default function App() {
     return matchesSearch && matchesTab;
   });
 
+  const renderResults = (variant?: 'A' | 'B') => {
+    const displayResults = variant 
+      ? state.results.filter(c => c.variant === variant)
+      : state.results;
+
+    return (
+      <AnimatePresence mode="popLayout">
+        {state.isGenerating ? (
+          Array.from({ length: 3 }).map((_, i) => (
+            <motion.div 
+              key={`skeleton-${variant}-${i}`}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="vibrant-card animate-pulse"
+            >
+              <div className="h-4 bg-white/5 rounded w-1/4 mb-4"></div>
+              <div className="h-4 bg-white/5 rounded w-full mb-2"></div>
+              <div className="h-4 bg-white/5 rounded w-full mb-2"></div>
+              <div className="h-4 bg-white/5 rounded w-2/3"></div>
+            </motion.div>
+          ))
+        ) : displayResults.length > 0 ? (
+          displayResults.map((caption) => (
+            <motion.div 
+              key={caption.id}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="vibrant-card group relative"
+            >
+              {variant && (
+                <div className={`absolute top-0 right-0 px-2 py-1 rounded-bl-xl text-[10px] font-bold uppercase tracking-widest border-l border-b border-border-subtle ${
+                  variant === 'A' ? 'bg-accent-teal/10 text-accent-teal' : 'bg-accent-purple/10 text-accent-purple'
+                }`}>
+                  Variant {variant}
+                </div>
+              )}
+              <div className="caption-text text-[15px] leading-relaxed mb-4 text-text-primary italic">
+                "{caption.text}"
+              </div>
+              
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mt-4 pt-4 border-t border-border-subtle gap-4">
+                <div className="flex items-center gap-3">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-text-secondary bg-white/5 px-2 py-1 rounded">
+                    {caption.platform} • {caption.tone}
+                  </span>
+                </div>
+                <div className="flex gap-2 w-full sm:w-auto">
+                  <button 
+                    onClick={() => toggleFavorite(caption.id)}
+                    className={`p-2 rounded-lg transition-all border ${
+                      caption.isFavorite 
+                        ? 'bg-rose-500/10 border-rose-500/50 text-rose-500' 
+                        : 'bg-transparent border-border-subtle text-text-secondary hover:bg-white/5'
+                    }`}
+                  >
+                    <Heart className={`w-4 h-4 ${caption.isFavorite ? 'fill-current' : ''}`} />
+                  </button>
+                  <button 
+                    onClick={() => handleAnalyzeHashtags(caption)}
+                    className="p-2 border border-border-subtle rounded-lg text-text-secondary hover:bg-white/5 hover:text-white transition-all"
+                    title="Suggest Hashtags"
+                  >
+                    <Hash className="w-4 h-4" />
+                  </button>
+                  <button 
+                    onClick={() => copyToClipboard(caption.text, caption.id)}
+                    className={`flex-1 sm:flex-none px-3 py-1.5 text-[12px] font-semibold border rounded-lg transition-all ${
+                      copiedId === caption.id 
+                        ? 'bg-accent-teal/10 border-accent-teal text-accent-teal' 
+                        : 'bg-transparent border-border-subtle text-text-secondary hover:bg-white/5'
+                    }`}
+                  >
+                    {copiedId === caption.id ? 'Copied!' : 'Copy'}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          ))
+        ) : (
+          !state.isGenerating && !variant && (
+            <div className="flex flex-col items-center justify-center py-20 opacity-20">
+              <Sparkles className="w-16 h-16 mb-4" />
+              <p className="text-xl font-bold">Your captions will appear here</p>
+            </div>
+          )
+        )}
+      </AnimatePresence>
+    );
+  };
+
   return (
     <div className="min-h-screen md:h-screen flex flex-col md:overflow-hidden">
       {/* Navbar */}
@@ -357,8 +495,6 @@ export default function App() {
           <div className="text-accent-teal text-sm font-semibold cursor-pointer">Generator</div>
           <div className="text-text-secondary text-sm font-medium cursor-pointer hover:text-text-primary" onClick={() => setShowTemplates(true)}>Templates</div>
           <div className="text-text-secondary text-sm font-medium cursor-pointer hover:text-text-primary" onClick={() => setShowHistory(true)}>History</div>
-          <div className="text-text-secondary text-sm font-medium cursor-pointer hover:text-text-primary">Library</div>
-          <div className="text-text-secondary text-sm font-medium cursor-pointer hover:text-text-primary">Settings</div>
         </nav>
 
         <div className="flex items-center gap-3">
@@ -369,12 +505,11 @@ export default function App() {
             {state.theme === 'light' ? <Moon className="w-5 h-5 text-text-secondary" /> : <Sun className="w-5 h-5 text-text-secondary" />}
           </button>
           <button 
-            onClick={() => setShowProfile(true)}
-            className="flex items-center gap-2 px-1.5 py-1.5 rounded-full hover:bg-white/5 transition-all text-text-secondary hover:text-text-primary"
+            onClick={() => setShowSettings(true)}
+            className="p-2 rounded-full hover:bg-white/5 transition-all text-text-secondary hover:text-text-primary"
+            title="Settings"
           >
-            <div className="w-8 h-8 rounded-full bg-accent-purple flex items-center justify-center font-bold text-xs text-white">
-              {state.profile.name ? state.profile.name[0].toUpperCase() : 'EP'}
-            </div>
+            <Settings className="w-5 h-5" />
           </button>
         </div>
       </header>
@@ -410,6 +545,42 @@ export default function App() {
         {/* Left Sidebar: Generator Panel */}
         <aside className="vibrant-sidebar custom-scrollbar md:h-full md:overflow-y-auto shrink-0">
           <div className="space-y-6">
+            {/* A/B Test Toggle */}
+            <div className="p-4 bg-white/5 rounded-2xl border border-border-subtle">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <Split className={`w-4 h-4 ${state.abMode ? 'text-accent-teal' : 'text-text-secondary'}`} />
+                  <span className="text-xs font-bold uppercase tracking-wider">A/B Testing</span>
+                </div>
+                <button 
+                  onClick={() => setState(prev => ({ ...prev, abMode: !prev.abMode }))}
+                  className={`w-10 h-5 rounded-full transition-all relative ${state.abMode ? 'bg-accent-teal' : 'bg-white/10'}`}
+                >
+                  <div className={`absolute top-1 w-3 h-3 rounded-full bg-white transition-all ${state.abMode ? 'left-6' : 'left-1'}`} />
+                </button>
+              </div>
+              <p className="text-[10px] text-text-secondary leading-relaxed">
+                Compare two different settings side-by-side to find the perfect caption style.
+              </p>
+              
+              {state.abMode && (
+                <div className="flex gap-2 mt-4 p-1 bg-black/20 rounded-xl">
+                  <button 
+                    onClick={() => setActiveVariant('A')}
+                    className={`flex-1 py-1.5 text-[10px] font-bold rounded-lg transition-all ${activeVariant === 'A' ? 'bg-white/10 text-white shadow-sm' : 'text-text-secondary hover:text-text-primary'}`}
+                  >
+                    Variant A
+                  </button>
+                  <button 
+                    onClick={() => setActiveVariant('B')}
+                    className={`flex-1 py-1.5 text-[10px] font-bold rounded-lg transition-all ${activeVariant === 'B' ? 'bg-white/10 text-white shadow-sm' : 'text-text-secondary hover:text-text-primary'}`}
+                  >
+                    Variant B
+                  </button>
+                </div>
+              )}
+            </div>
+
             <div>
               <label className="vibrant-label">Visual Content</label>
               <label className="vibrant-upload min-h-[160px] md:h-44 w-full relative">
@@ -456,15 +627,18 @@ export default function App() {
             <div>
               <label className="vibrant-label">Platforms</label>
               <div className="flex flex-wrap gap-2">
-                {PLATFORMS.map(p => (
-                  <div
-                    key={p}
-                    onClick={() => togglePlatform(p)}
-                    className={`vibrant-chip ${state.options.platforms.includes(p) ? 'active' : ''}`}
-                  >
-                    {p}
-                  </div>
-                ))}
+                {PLATFORMS.map(p => {
+                  const currentOptions = activeVariant === 'A' ? state.options : state.abOptions;
+                  return (
+                    <div
+                      key={p}
+                      onClick={() => togglePlatform(p)}
+                      className={`vibrant-chip ${currentOptions?.platforms.includes(p) ? 'active' : ''}`}
+                    >
+                      {p}
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
@@ -494,8 +668,11 @@ export default function App() {
               <div>
                 <label className="vibrant-label">Tone</label>
                 <select 
-                  value={state.options.tone}
-                  onChange={(e) => setState(prev => ({ ...prev, options: { ...prev.options, tone: e.target.value as Tone }}))}
+                  value={(activeVariant === 'A' ? state.options : state.abOptions)?.tone}
+                  onChange={(e) => {
+                    const target = activeVariant === 'A' ? 'options' : 'abOptions';
+                    setState(prev => ({ ...prev, [target]: { ...prev[target]!, tone: e.target.value as Tone }}));
+                  }}
                   className="vibrant-input"
                 >
                   {TONES.map(t => <option key={t} value={t}>{t}</option>)}
@@ -504,8 +681,11 @@ export default function App() {
               <div>
                 <label className="vibrant-label">Length</label>
                 <select 
-                  value={state.options.length}
-                  onChange={(e) => setState(prev => ({ ...prev, options: { ...prev.options, length: e.target.value as Length }}))}
+                  value={(activeVariant === 'A' ? state.options : state.abOptions)?.length}
+                  onChange={(e) => {
+                    const target = activeVariant === 'A' ? 'options' : 'abOptions';
+                    setState(prev => ({ ...prev, [target]: { ...prev[target]!, length: e.target.value as Length }}));
+                  }}
                   className="vibrant-input"
                 >
                   <option value="Short">Short (1-2 lines)</option>
@@ -518,8 +698,11 @@ export default function App() {
             <div>
               <label className="vibrant-label">Language</label>
               <select 
-                value={state.options.language}
-                onChange={(e) => setState(prev => ({ ...prev, options: { ...prev.options, language: e.target.value }}))}
+                value={(activeVariant === 'A' ? state.options : state.abOptions)?.language}
+                onChange={(e) => {
+                  const target = activeVariant === 'A' ? 'options' : 'abOptions';
+                  setState(prev => ({ ...prev, [target]: { ...prev[target]!, language: e.target.value }}));
+                }}
                 className="vibrant-input"
               >
                 {LANGUAGES.map(l => <option key={l} value={l}>{l}</option>)}
@@ -531,8 +714,11 @@ export default function App() {
                 <span className="text-[13px] text-text-secondary group-hover:text-text-primary transition-colors">Include Emojis</span>
                 <input 
                   type="checkbox" 
-                  checked={state.options.includeEmojis}
-                  onChange={(e) => setState(prev => ({ ...prev, options: { ...prev.options, includeEmojis: e.target.checked }}))}
+                  checked={(activeVariant === 'A' ? state.options : state.abOptions)?.includeEmojis}
+                  onChange={(e) => {
+                    const target = activeVariant === 'A' ? 'options' : 'abOptions';
+                    setState(prev => ({ ...prev, [target]: { ...prev[target]!, includeEmojis: e.target.checked }}));
+                  }}
                   className="w-4 h-4 rounded border-border-subtle bg-bg-card accent-accent-teal"
                 />
               </label>
@@ -540,8 +726,11 @@ export default function App() {
                 <span className="text-[13px] text-text-secondary group-hover:text-text-primary transition-colors">Include Hashtags</span>
                 <input 
                   type="checkbox" 
-                  checked={state.options.includeHashtags}
-                  onChange={(e) => setState(prev => ({ ...prev, options: { ...prev.options, includeHashtags: e.target.checked }}))}
+                  checked={(activeVariant === 'A' ? state.options : state.abOptions)?.includeHashtags}
+                  onChange={(e) => {
+                    const target = activeVariant === 'A' ? 'options' : 'abOptions';
+                    setState(prev => ({ ...prev, [target]: { ...prev[target]!, includeHashtags: e.target.checked }}));
+                  }}
                   className="w-4 h-4 rounded border-border-subtle bg-bg-card accent-accent-teal"
                 />
               </label>
@@ -575,10 +764,14 @@ export default function App() {
           <div className="results-header flex items-end justify-between mb-8">
             <div>
               <h2 className="text-3xl font-bold bg-gradient-to-r from-white to-text-secondary bg-clip-text text-transparent">
-                Generated for You
+                {state.abMode ? 'A/B Comparison' : 'Generated for You'}
               </h2>
               <p className="text-text-secondary text-sm">
-                {state.results.length > 0 ? `Based on your "${state.context.slice(0, 20)}..." context` : 'Start by entering some context or uploading a photo'}
+                {state.results.length > 0 
+                  ? (state.abMode 
+                      ? 'Compare Variant A (Left) vs Variant B (Right)' 
+                      : `Based on your "${state.context.slice(0, 20)}..." context`) 
+                  : 'Start by entering some context or uploading a photo'}
               </p>
             </div>
             {state.results.length > 0 && (
@@ -592,97 +785,27 @@ export default function App() {
             )}
           </div>
 
-          <div className="caption-grid space-y-5">
-            <AnimatePresence mode="popLayout">
-              {state.isGenerating ? (
-                Array.from({ length: 3 }).map((_, i) => (
-                  <motion.div 
-                    key={`skeleton-${i}`}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.95 }}
-                    className="vibrant-card animate-pulse"
-                  >
-                    <div className="h-4 bg-white/5 rounded w-1/4 mb-4"></div>
-                    <div className="h-4 bg-white/5 rounded w-full mb-2"></div>
-                    <div className="h-4 bg-white/5 rounded w-full mb-2"></div>
-                    <div className="h-4 bg-white/5 rounded w-2/3"></div>
-                  </motion.div>
-                ))
-              ) : state.results.length > 0 ? (
-                state.results.map((caption) => (
-                  <motion.div 
-                    key={caption.id}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="vibrant-card group"
-                  >
-                    <div className="caption-text text-[15px] leading-relaxed mb-4 text-text-primary italic">
-                      "{caption.text}"
-                    </div>
-                    
-                    <div className="flex items-center justify-between mt-4 pt-4 border-t border-border-subtle">
-                      <div className="flex items-center gap-3">
-                        <span className="text-[11px] font-bold uppercase tracking-wider text-text-secondary bg-white/5 px-2 py-1 rounded">
-                          {caption.platform} • {caption.tone}
-                        </span>
-                      </div>
-                      <div className="flex gap-3">
-                        <button 
-                          onClick={() => toggleFavorite(caption.id)}
-                          className={`p-2 rounded-lg transition-all border ${
-                            caption.isFavorite 
-                              ? 'bg-rose-500/10 border-rose-500/50 text-rose-500' 
-                              : 'bg-transparent border-border-subtle text-text-secondary hover:bg-white/5'
-                          }`}
-                        >
-                          <Heart className={`w-4 h-4 ${caption.isFavorite ? 'fill-current' : ''}`} />
-                        </button>
-                        <button 
-                          onClick={() => handleAnalyzeHashtags(caption)}
-                          className="p-2 border border-border-subtle rounded-lg text-text-secondary hover:bg-white/5 hover:text-white transition-all"
-                          title="Suggest Hashtags"
-                        >
-                          <Hash className="w-4 h-4" />
-                        </button>
-                        <button 
-                          onClick={() => copyToClipboard(caption.text, caption.id)}
-                          className={`px-3 py-1.5 text-[12px] font-semibold border rounded-lg transition-all ${
-                            copiedId === caption.id 
-                              ? 'bg-accent-teal/10 border-accent-teal text-accent-teal' 
-                              : 'bg-transparent border-border-subtle text-text-secondary hover:bg-white/5 hover:text-white'
-                          }`}
-                        >
-                          {copiedId === caption.id ? 'Copied!' : 'Copy Caption'}
-                        </button>
-                        <button 
-                          className="px-3 py-1.5 text-[12px] font-semibold border border-border-subtle rounded-lg text-text-secondary hover:bg-white/5 hover:text-white transition-all"
-                          onClick={() => {
-                            const urlMap: Record<string, string> = {
-                              'Instagram': 'https://instagram.com',
-                              'TikTok': 'https://tiktok.com',
-                              'Facebook': 'https://facebook.com',
-                              'LinkedIn': 'https://linkedin.com',
-                              'X/Twitter': 'https://twitter.com',
-                              'Pinterest': 'https://pinterest.com',
-                              'Threads': 'https://threads.net'
-                            };
-                            window.open(urlMap[caption.platform], '_blank');
-                          }}
-                        >
-                          Visit Platform
-                        </button>
-                      </div>
-                    </div>
-                  </motion.div>
-                ))
-              ) : (
-                <div className="flex flex-col items-center justify-center py-20 opacity-20">
-                  <Sparkles className="w-16 h-16 mb-4" />
-                  <p className="text-xl font-bold">Your captions will appear here</p>
+          <div className={`caption-grid ${state.abMode ? 'grid grid-cols-1 lg:grid-cols-2 gap-8 space-y-0' : 'space-y-5'}`}>
+            {state.abMode ? (
+              <>
+                <div className="space-y-5">
+                  <div className="flex items-center gap-2 mb-4">
+                    <span className="px-2 py-0.5 bg-accent-teal/10 text-accent-teal border border-accent-teal/50 rounded text-[10px] font-bold uppercase tracking-widest">Variant A</span>
+                    <span className="text-[10px] text-text-secondary uppercase tracking-widest font-bold">{state.options.tone} • {state.options.length}</span>
+                  </div>
+                  {renderResults('A')}
                 </div>
-              )}
-            </AnimatePresence>
+                <div className="space-y-5">
+                  <div className="flex items-center gap-2 mb-4">
+                    <span className="px-2 py-0.5 bg-accent-purple/10 text-accent-purple border border-accent-purple/50 rounded text-[10px] font-bold uppercase tracking-widest">Variant B</span>
+                    <span className="text-[10px] text-text-secondary uppercase tracking-widest font-bold">{(state.abOptions || state.options).tone} • {(state.abOptions || state.options).length}</span>
+                  </div>
+                  {renderResults('B')}
+                </div>
+              </>
+            ) : (
+              renderResults()
+            )}
           </div>
         </section>
       </main>
@@ -830,15 +953,15 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* Profile Modal */}
+      {/* Settings Modal */}
       <AnimatePresence>
-        {showProfile && (
+        {showSettings && (
           <>
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              onClick={() => setShowProfile(false)}
+              onClick={() => setShowSettings(false)}
               className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[100]"
             />
             <motion.div 
@@ -851,15 +974,15 @@ export default function App() {
                 <div className="flex items-center justify-between mb-8">
                   <div className="flex items-center gap-3">
                     <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-accent-teal to-accent-purple flex items-center justify-center text-white">
-                      <User className="w-6 h-6" />
+                      <Settings className="w-6 h-6" />
                     </div>
                     <div>
-                      <h2 className="text-2xl font-bold">User Profile</h2>
-                      <p className="text-text-secondary text-sm">Customize your default settings</p>
+                      <h2 className="text-2xl font-bold">Settings</h2>
+                      <p className="text-text-secondary text-sm">Customize your default preferences</p>
                     </div>
                   </div>
                   <button 
-                    onClick={() => setShowProfile(false)}
+                    onClick={() => setShowSettings(false)}
                     className="p-2 hover:bg-white/5 rounded-full text-text-secondary"
                   >
                     <X className="w-6 h-6" />
@@ -867,23 +990,12 @@ export default function App() {
                 </div>
 
                 <div className="space-y-6">
-                  <div>
-                    <label className="vibrant-label">Your Name</label>
-                    <input 
-                      type="text" 
-                      value={state.profile.name}
-                      onChange={(e) => setState(prev => ({ ...prev, profile: { ...prev.profile, name: e.target.value } }))}
-                      placeholder="Enter your name..."
-                      className="vibrant-input py-3 px-4"
-                    />
-                  </div>
-
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="vibrant-label">Default Tone</label>
                       <select 
-                        value={state.profile.defaultTone}
-                        onChange={(e) => setState(prev => ({ ...prev, profile: { ...prev.profile, defaultTone: e.target.value as Tone } }))}
+                        value={state.settings.defaultTone}
+                        onChange={(e) => setState(prev => ({ ...prev, settings: { ...prev.settings, defaultTone: e.target.value as Tone } }))}
                         className="vibrant-input"
                       >
                         {TONES.map(t => <option key={t} value={t}>{t}</option>)}
@@ -892,8 +1004,8 @@ export default function App() {
                     <div>
                       <label className="vibrant-label">Default Language</label>
                       <select 
-                        value={state.profile.defaultLanguage}
-                        onChange={(e) => setState(prev => ({ ...prev, profile: { ...prev.profile, defaultLanguage: e.target.value } }))}
+                        value={state.settings.defaultLanguage}
+                        onChange={(e) => setState(prev => ({ ...prev, settings: { ...prev.settings, defaultLanguage: e.target.value } }))}
                         className="vibrant-input"
                       >
                         {LANGUAGES.map(l => <option key={l} value={l}>{l}</option>)}
@@ -908,16 +1020,16 @@ export default function App() {
                         <div
                           key={p}
                           onClick={() => {
-                            const current = state.profile.defaultPlatforms;
+                            const current = state.settings.defaultPlatforms;
                             const next = current.includes(p) 
                               ? current.filter(x => x !== p)
                               : [...current, p];
                             if (next.length > 0) {
-                              setState(prev => ({ ...prev, profile: { ...prev.profile, defaultPlatforms: next } }));
+                              setState(prev => ({ ...prev, settings: { ...prev.settings, defaultPlatforms: next } }));
                             }
                           }}
                           className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
-                            state.profile.defaultPlatforms.includes(p)
+                            state.settings.defaultPlatforms.includes(p)
                               ? 'bg-accent-teal/10 border-accent-teal text-accent-teal'
                               : 'bg-white/5 border-border-subtle text-text-secondary'
                           }`}
@@ -931,7 +1043,7 @@ export default function App() {
 
                 <div className="mt-10 flex gap-4">
                   <button 
-                    onClick={() => saveProfile(state.profile)}
+                    onClick={() => saveSettings(state.settings)}
                     className="flex-1 btn-vibrant-generate flex items-center justify-center gap-2"
                   >
                     <Save className="w-5 h-5" />
@@ -1150,7 +1262,17 @@ export default function App() {
                   </div>
 
                   <div className="flex flex-wrap gap-2">
-                    {isAnalyzing ? (
+                    {hashtagError ? (
+                      <div className="w-full p-6 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-center gap-4 group">
+                        <div className="w-10 h-10 rounded-xl bg-red-500/20 flex items-center justify-center shrink-0">
+                          <AlertCircle className="w-5 h-5 text-red-400" />
+                        </div>
+                        <div className="flex flex-col">
+                          <p className="text-sm font-bold text-red-400">{hashtagError.split(':')[0]}</p>
+                          <p className="text-xs text-red-400/70">{hashtagError.split(':')[1] || hashtagError}</p>
+                        </div>
+                      </div>
+                    ) : isAnalyzing ? (
                       Array.from({ length: 8 }).map((_, i) => (
                         <div key={i} className="h-8 w-24 bg-white/5 rounded-full animate-pulse" />
                       ))

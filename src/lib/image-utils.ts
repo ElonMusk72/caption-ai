@@ -1,4 +1,4 @@
-export async function resizeImage(base64Str: string, maxWidth = 1024, maxHeight = 1024): Promise<string> {
+export async function resizeImage(base64Str: string, maxWidth = 800, maxHeight = 800): Promise<string> {
   return new Promise((resolve) => {
     const img = new Image();
     img.src = base64Str;
